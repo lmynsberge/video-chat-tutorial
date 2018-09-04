@@ -9,10 +9,11 @@
     <link href="https://ok1static.oktacdn.com/assets/js/sdk/okta-signin-widget/2.6.0/css/okta-sign-in.min.css" type="text/css" rel="stylesheet"/>
     <link href="https://ok1static.oktacdn.com/assets/js/sdk/okta-signin-widget/2.6.0/css/okta-theme.css" type="text/css" rel="stylesheet"/>
 
-    <script data-main="static/js/simplewebrtc" src="static/js/require.js"></script>
-    <script src="https://webrtc.github.io/adapter/adapter-4.2.2.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/2.1.1/socket.io.js"></script>
+    <script type="text/javascript" src="static/js/rtc/easyrtc.js"></script>
     
-    <link rel="stylesheet" href="static/css/style.css" type="text/css" />
+    <link rel="stylesheet" type="text/css" href="static/css/rtc/easyrtc.css" />
+    <link rel="stylesheet" type="text/css" href="static/css/style.css" />
   </head>
   <body>
     <div class="container">
@@ -41,8 +42,12 @@
       <div id="remotes" class="row">
         <div class="col-md-6">
           <div class="videoContainer">
-            <video id="selfVideo"></video>
+            <video id="selfVideo" muted="muted"></video>
             <meter id="localVolume" class="volume" min="-45" max="-20" high="-25" low="-40"></meter>
+            <div class="closeButton"></div>
+          </div>
+          <div style="position:relative;float:left;width:300px">
+              <video id="callerVideo" width="300" height="200"></video>
           </div>
         </div>
       </div>
@@ -137,168 +142,93 @@
         }
       }
     
-    // Dynamically load the simplewebrtc script so that we can
-    // kickstart the video call.
-    function loadSimpleWebRTC() {
-      var script = document.createElement("script");
-      script.src = "static/js/simplewebrtc.js";
-      document.head.appendChild(script);
 
-      script.onload = function() {
-        var webrtc = new SimpleWebRTC({
-          localVideoEl: "selfVideo",
-          // the id/element dom element that will hold remote videos
-          remoteVideosEl: "",
-          autoRequestMedia: true,
-          debug: false,
-          detectSpeakingEvents: true,
-          autoAdjustMic: false
-        });
 
-        // Set the publicly available room URL.
-        document.getElementById("roomUrl").innerText = getRoomURL();
 
-        // Immediately join room when loaded.
-        webrtc.on("readyToCall", function() {
-          webrtc.joinRoom(getRoom());
-        });
-
-        function showVolume(el, volume) {
-          if (!el) return;
-          if (volume < -45) volume = -45; // -45 to -20 is
-          if (volume > -20) volume = -20; // a good range
-          el.value = volume;
-        }
-
-        // Display the volume meter.
-        webrtc.on("localStream", function(stream) {
-          var button = document.querySelector("form>button");
-          if (button) button.removeAttribute("disabled");
-          document.getElementById("localVolume").style.display = "block";
-        });
-
-        // If we didn't get access to the camera, raise an error.
-        webrtc.on("localMediaError", function (err) {
-          alert("This service only works if you allow camera access.Please grant access and refresh the page.");
-        });
-
-        // When another person joins the chat room, we'll display their video.
-        webrtc.on("videoAdded", function(video, peer) {
-          console.log("user added to chat", peer);
-          var remotes = document.getElementById("remotes");
-
-          if (remotes) {
-            var outerContainer = document.createElement("div");
-            outerContainer.className = "col-md-6";
-
-            var container = document.createElement("div");
-            container.className = "videoContainer";
-            container.id = "container_" + webrtc.getDomId(peer);
-            container.appendChild(video);
-
-            // Suppress right-clicks on the video.
-            video.oncontextmenu = function() { return false; };
-
-            // Show the volume meter.
-            var vol = document.createElement("meter");
-            vol.id = "volume_" + peer.id;
-            vol.className = "volume";
-            vol.min = -45;
-            vol.max = -20;
-            vol.low = -40;
-            vol.high = -25;
-            container.appendChild(vol);
-
-            // Show the connection state.
-            if (peer && peer.pc) {
-              var connstate = document.createElement("div");
-              connstate.className = "connectionstate";
-              container.appendChild(connstate);
-
-              peer.pc.on("iceConnectionStateChange", function(event) {
-                switch (peer.pc.iceConnectionState) {
-                  case "checking":
-                    connstate.innerText = "connecting to peer...";
-                    break;
-                  case "connected":
-                  case "completed": // on caller side
-                    vol.style.display = "block";
-                    connstate.innerText = "connection established";
-                    break;
-                  case "disconnected":
-                    connstate.innerText = "disconnected";
-                    break;
-                  case "failed":
-                    connstate.innerText = "connection failed";
-                    break;
-                  case "closed":
-                    connstate.innerText = "connection closed";
-                    break;
-                }
-              });
-            }
-
-            outerContainer.appendChild(container);
-            remotes.appendChild(outerContainer);
-
-            // If we're adding a new video we need to modify bootstrap so we
-            // only get two videos per row.
-            var remoteVideos = document.getElementById("remotes").getElementsByTagName("video").length;
-
-            if (!(remoteVideos % 2)) {
-              var spacer = document.createElement("div");
-              spacer.className = "w-100";
-              remotes.appendChild(spacer);
-            }
-          }
-        });
-
-        // If a user disconnects from chat, we need to remove their video feed.
-        webrtc.on("videoRemoved", function(video, peer) {
-          console.log("user removed from chat", peer);
-          var remotes = document.getElementById("remotes");
-          var el = document.getElementById("container_" + webrtc.getDomId(peer));
-          if (remotes && el) {
-            remotes.removeChild(el.parentElement);
-          }
-        });
-
-        // If our volume has changed, update the meter.
-        webrtc.on("volumeChange", function(volume, treshold) {
-          showVolume(document.getElementById("localVolume"), volume);
-        });
-
-        // If a remote user's volume has changed, update the meter.
-        webrtc.on("remoteVolumeChange", function(peer, volume) {
-          showVolume(document.getElementById("volume_" + peer.id), volume);
-        });
-
-        // If there is a P2P failure, we need to error out.
-        webrtc.on("iceFailed", function(peer) {
-          var connstate = document.querySelector("#container_" + webrtc.getDomId(peer) + " .connectionstate");
-          console.log("local fail", connstate);
-          if (connstate) {
-            connstate.innerText = "connection failed";
-            fileinput.disabled = "disabled";
-          }
-        });
-
-        // remote p2p/ice failure
-        webrtc.on("connectivityError", function (peer) {
-          var connstate = document.querySelector("#container_" + webrtc.getDomId(peer) + " .connectionstate");
-          console.log("remote fail", connstate);
-          if (connstate) {
-            connstate.innerText = "connection failed";
-            fileinput.disabled = "disabled";
-          }
-        });
-      }
-    }
     // Enable video on the page.
     function enableVideo() {
       document.getElementById("url").style.display = "block";
       document.getElementById("remotes").style.visibility = "visible";
-      loadSimpleWebRTC();
+      // loadSimpleWebRTC();
+      my_init();
+    }
+    // Global for now to check status
+    var mediaEnabled;
+
+    function my_init() {
+         easyrtc.setRoomOccupantListener( loggedInListener);
+         easyrtc.easyApp("Company_Chat_Line", "selfVideo", ["callerVideo"],
+             appSuccessHandler,
+             appFailureHandler
+         );
+        
+        var closeSelfDiv = document.getElementsByClassName('closeButton')[0];
+        closeSelfDiv.addEventListener('click', endCall);
+        mediaEnabled = true;
+     }
+
+     // Connection failure & success
+     function appSuccessHandler(myId) {
+         console.log("Success. ID: " + myId );
+     }
+
+      function appFailureHandler(errorCode, message) {
+         console.log("Failure initializing EasyApp. Code: " + errorCode + ", Message: " + message);
+     }
+
+
+     function loggedInListener(roomName, otherPeers) {
+        var otherClientDiv = document.getElementById('otherClients');
+        if (!otherClientDiv) {
+          return;
+        }
+        while (otherClientDiv.hasChildNodes()) {
+            otherClientDiv.removeChild(otherClientDiv.lastChild);
+        }
+        for(var i in otherPeers) {
+            var button = document.createElement('button');
+            button.onclick = function(easyrtcid) {
+                return function() {
+                    performCall(easyrtcid);
+                }
+            }(i);
+
+            label = document.createTextNode(i);
+            button.appendChild(label);
+            otherClientDiv.appendChild(button);
+        }
+    }
+
+
+    function performCall(easyrtcid) {
+        easyrtc.call(
+           easyrtcid,
+           function(easyrtcid) { console.log("completed call to " + easyrtcid);},
+           function(errorMessage) { console.log("err:" + errorMessage);},
+           function(accepted, bywho) {
+              console.log((accepted?"accepted":"rejected")+ " by " + bywho);
+           }
+       );
+    }
+
+    function endCall(easyrtcid) {
+      if( mediaEnabled ) {
+        var mediaStream = easyrtc.getLocalStream();
+        if (mediaStream) {
+          console.log("Media stream closed: " + mediaStream.id);
+        }
+        easyrtc.enableCamera(false);
+        easyrtc.enableMicrophone(false);
+        easyrtc.closeLocalMediaStream();
+        easyrtc.hangupAll();
+        easyrtc.disconnect();
+      }
+      else {
+        my_init();
+      }
+
+      mediaEnabled = !mediaEnabled;
+      
     }
 
       handleLogin();
